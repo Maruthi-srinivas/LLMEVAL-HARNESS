@@ -1,0 +1,5 @@
+{"id":"qa-001","input":"How do I reset my password?","expected_output":"Use the password reset option on the sign-in page.","context":"Users can reset their password using the Forgot Password option.","tags":["support","factual"]}
+{"id":"qa-002","input":"Can I change my registered email?","expected_output":"Follow the documented account email change process.","context":"Account email changes require verification of the new address.","tags":["support","account"]}
+{"id":"qa-003","input":"What is the refund policy?","expected_output":"The answer must accurately describe the documented refund policy.","context":"Refunds are available within 30 days for eligible purchases.","tags":["support","policy"]}
+{"id":"qa-004","input":"Return the account status as JSON.","expected_output":"{\"status\":\"ok\"}","json_schema":{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string"}},"required":["status"]},"tags":["structured"]}
+{"id":"qa-err","input":"This request times out.","expected_output":"This case is expected to fail before scoring.","tags":["error"]}
