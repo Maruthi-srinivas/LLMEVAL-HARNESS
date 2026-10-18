@@ -7,11 +7,33 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db, get_principal
 from backend.app.errors import APIError, dataset_error_details
-from backend.app.services.access import Principal, require_dataset, require_project
-from backend.app.services.datasets import cases_for_version, import_cases, version_summaries
+from backend.app.schemas import CalibrationRequest
+from backend.app.services.access import Principal, require_dataset, require_project, require_run
+from backend.app.services.calibration import calibration_report
+from backend.app.services.datasets import cases_for_version, import_cases, list_datasets, version_summaries
 from evaluator.datasets.loader import MAX_DATASET_BYTES, DatasetValidationError, load_jsonl_text
 
 router = APIRouter(tags=["datasets"])
+
+
+@router.get("/datasets")
+def read_datasets(
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_db),
+) -> dict:
+    return {"datasets": list_datasets(session, principal.workspace.id)}
+
+
+@router.post("/datasets/{dataset_id}/calibration")
+def read_calibration(
+    dataset_id: UUID,
+    body: CalibrationRequest,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_db),
+) -> dict:
+    require_dataset(session, principal.workspace.id, dataset_id)
+    run = require_run(session, principal.workspace.id, body.run_id)
+    return calibration_report(session, dataset_id, run, body.evaluator_names)
 
 
 @router.post("/datasets", status_code=201)
@@ -100,6 +122,15 @@ def read_dataset_version(
                 "context": case.context,
                 "tags": case.tags,
                 "json_schema": case.json_schema,
+                "relevant_document_ids": case.relevant_document_ids,
+                "retrieved_context": case.retrieved_context,
+                "citations": case.citations,
+                "expected_policy": case.expected_policy,
+                "human_labels": case.human_labels,
+                "allowed_tools": case.allowed_tools,
+                "goal": case.goal,
+                "constraints": case.constraints,
+                "expected_tools": case.expected_tools,
             }
             for case in cases_for_version(session, version.id)
         ],

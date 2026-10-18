@@ -10,6 +10,10 @@ x-app-env: &app-env
   DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://evalforge:evalforge@postgres:5432/evalforge}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   SECRET_KEY: ${SECRET_KEY:-dev-only-change-me}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+  EVALFORGE_CORS_ORIGIN: ${EVALFORGE_CORS_ORIGIN:-http://localhost:3000}
+  API_URL: http://api:8000
+  MCP_URL: http://mcp:8090/mcp
 
 services:
   postgres:
@@ -54,6 +58,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mcp:
+        condition: service_started
 
   beat:
     <<: *app-image
@@ -84,12 +90,24 @@ services:
         condition: service_started
       beat:
         condition: service_started
+      mcp:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
 
   runner:
     profiles: ["sample"]
@@ -103,5 +121,134 @@ services:
         condition: service_healthy
     restart: "no"
 
+  mcp:
+    <<: *app-image
+    environment: *app-env
+    command: ["python", "-m", "evaluator.adapters.mcp_server"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  rag:
+    <<: *app-image
+    environment: *app-env
+    command: ["python", "-m", "evaluator.adapters.rag_server"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  cli:
+    <<: *app-image
+    environment: *app-env
+    entrypoint: ["python", "-m", "evaluator.cli"]
+    command: ["decide", "--help"]
+    restart: "no"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  kafka:
+    image: apache/kafka:3.8.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:3.2.1
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./deploy/observability/loki.yml:/etc/loki/config.yml:ro
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./deploy/observability/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+  minio:
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: evalforge
+      MINIO_ROOT_PASSWORD: evalforge-secret
+    volumes:
+      - minio:/data
+    ports:
+      - "9000:9000"
+
+  backup:
+    profiles: ["backup"]
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-evalforge}
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command: ["sh", "-c", "pg_dump -h postgres -U ${POSTGRES_USER:-evalforge} ${POSTGRES_DB:-evalforge} > /backups/evalforge-$$(date +%Y%m%d%H%M%S).sql"]
+
+  backup-upload:
+    profiles: ["backup"]
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+    depends_on:
+      - backup
+      - minio
+    volumes:
+      - backups:/backups
+    restart: "no"
+    entrypoint: ["sh", "-c", "mc alias set local http://minio:9000 evalforge evalforge-secret && mc mb -p local/backups || true && mc cp /backups/*.sql local/backups/ && mc find local/backups --older-than 14d --name '*.sql' --exec 'mc rm {}'"]
+
+  postgres-restore:
+    profiles: ["restore"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-evalforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-evalforge}
+      POSTGRES_DB: restored
+    volumes:
+      - backups:/backups
+    restart: "no"
+
 volumes:
   pgdata:
+  minio:
+  backups:

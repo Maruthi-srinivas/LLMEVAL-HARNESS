@@ -1,0 +1,21 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  release-pair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Known faithfulness failure
+        run: |
+          set +e
+          output=$(docker compose run --rm cli decide --dataset sample_datasets/release_candidate.jsonl --baseline-dataset sample_datasets/release_baseline.jsonl --behavior release_candidate --baseline-behavior release_baseline --evaluators correctness,faithfulness --metric-minimums "{\"correctness\": 0.5, \"faithfulness\": 0.5}")
+          code=$?
+          set -e
+          echo "$output"
+          echo "$output" | grep -q '"decision": "fail"'
+          test "$code" -eq 1

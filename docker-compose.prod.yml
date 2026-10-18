@@ -1,0 +1,18 @@
+include:
+  - docker-compose.yml
+
+services:
+  caddy:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      EVALFORGE_DOMAIN: ${EVALFORGE_DOMAIN:-localhost}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_started

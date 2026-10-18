@@ -105,6 +105,15 @@ def ensure_dataset_version(session: Session, project_id: uuid.UUID, cases: list[
                 context=case.context,
                 tags=list(case.tags),
                 json_schema=case.json_schema,
+                relevant_document_ids=list(case.relevant_document_ids),
+                retrieved_context=None if case.retrieved_context is None else list(case.retrieved_context),
+                citations=list(case.citations),
+                expected_policy=case.expected_policy,
+                human_labels=case.human_labels,
+                allowed_tools=list(case.allowed_tools),
+                goal=case.goal,
+                constraints=list(case.constraints),
+                expected_tools=list(case.expected_tools),
             )
         )
     session.flush()
@@ -167,6 +176,9 @@ def persist_case(
         latency_ms=result.latency_ms,
         token_usage=result.token_usage,
         result_metadata={},
+        retrieved_documents=result.retrieved_documents,
+        citations=result.citations,
+        trace=result.trace,
     )
     session.add(case_result)
     session.flush()

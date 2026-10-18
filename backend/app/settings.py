@@ -19,3 +19,15 @@ def allow_inline_execution() -> bool:
 
 def enqueue_runs_enabled() -> bool:
     return os.environ.get("EVALFORGE_ENQUEUE_RUNS", "true").lower() in {"1", "true", "yes"}
+
+
+def kafka_bootstrap() -> str:
+    return os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "").strip()
+
+
+def capture_content() -> bool:
+    return os.environ.get("EVAL_CAPTURE_CONTENT", "false").lower() in {"1", "true", "yes"}
+
+
+def cors_origin() -> str:
+    return os.environ.get("EVALFORGE_CORS_ORIGIN", "http://localhost:3000")

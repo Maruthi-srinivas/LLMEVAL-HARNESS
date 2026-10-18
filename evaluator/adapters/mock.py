@@ -12,17 +12,28 @@ class TargetAdapter(Protocol):
     async def invoke(self, input_text: str, metadata: dict[str, Any]) -> TargetResult: ...
 
 
-def success_result(output: str, latency_ms: float = 20.0) -> TargetResult:
+def success_result(
+    output: str,
+    latency_ms: float = 20.0,
+    documents: list[dict] | None = None,
+    input_tokens: int = 12,
+    output_tokens: int | None = None,
+    behavior: str | None = None,
+) -> TargetResult:
+    metadata: dict[str, Any] = {
+        "latency_ms": latency_ms,
+        "token_usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": max(1, len(output.split())) if output_tokens is None else output_tokens,
+        },
+    }
+    if behavior:
+        metadata["behavior"] = behavior
     return TargetResult(
         output=output,
         context=[],
-        metadata={
-            "latency_ms": latency_ms,
-            "token_usage": {
-                "input_tokens": 12,
-                "output_tokens": max(1, len(output.split())),
-            },
-        },
+        metadata=metadata,
+        documents=list(documents or []),
     )
 
 

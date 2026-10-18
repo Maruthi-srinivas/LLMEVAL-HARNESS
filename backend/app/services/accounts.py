@@ -39,7 +39,7 @@ def register_user(session: Session, email: str, password: str, workspace_name: s
         session.flush()
     except IntegrityError as exc:
         raise APIError(400, "validation_error", "Account could not be created") from exc
-    principal = Principal(user=user, workspace=workspace, project=project)
+    principal = Principal(user=user, workspace=workspace, project=project, role="owner")
     return principal, create_token(user.id)
 
 

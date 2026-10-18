@@ -10,9 +10,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.db import session_scope
-from backend.app.models import CaseAttempt, CaseResult, EvaluationRun, MetricResult, TargetConfig, TestCase
+from backend.app.models import CaseAttempt, CaseResult, EvaluationRun, MetricResult, Project, TargetConfig, TestCase
+from backend.app.services.budgets import budget_exhausted
 from backend.app.services.evaluations import _REGISTRY
+from evaluator.adapters.http_rag import HttpRagAdapter
+from evaluator.adapters.langgraph_agent import LangGraphAdapter
 from evaluator.adapters.mock import MockTargetAdapter, rate_limit_result, success_result, timeout_result
+from evaluator.metrics.safety import REFUSAL_SENTENCE
 from evaluator.runner import _execute_case
 from evaluator.status import transition
 from evaluator.store import persist_case
@@ -31,6 +35,12 @@ def process_run(run_id: str, max_batches: int | None = None) -> None:
         if claimed is None:
             return
         if not claimed:
+            if _is_cancelled(run_id):
+                _finalize(run_id)
+                return
+            if _budget_blocks(run_id):
+                _finalize_budget(run_id)
+                return
             _finalize(run_id)
             return
         for index, test_case_id in enumerate(claimed):
@@ -44,6 +54,61 @@ def process_run(run_id: str, max_batches: int | None = None) -> None:
             return
 
 
+def _another_run_is_active(session, run: EvaluationRun) -> bool:
+    workspace_id = session.scalar(select(Project.workspace_id).where(Project.id == run.project_id))
+    other = session.scalar(
+        select(EvaluationRun.id)
+        .join(Project, EvaluationRun.project_id == Project.id)
+        .where(
+            Project.workspace_id == workspace_id,
+            EvaluationRun.status == "running",
+            EvaluationRun.id != run.id,
+        )
+    )
+    return other is not None
+
+
+def _budget_reached(session, run: EvaluationRun) -> bool:
+    workspace_id = session.scalar(select(Project.workspace_id).where(Project.id == run.project_id))
+    return bool(workspace_id and budget_exhausted(session, workspace_id))
+
+
+def _budget_blocks(run_id: str) -> bool:
+    with session_scope() as session:
+        run = session.get(EvaluationRun, uuid.UUID(run_id))
+        if run is None:
+            return False
+        return _budget_reached(session, run)
+
+
+def _finalize_budget(run_id: str) -> None:
+    with session_scope() as session:
+        run = session.get(EvaluationRun, uuid.UUID(run_id))
+        if run is None or run.status in {"completed", "partial", "cancelled"}:
+            return
+        now = _now()
+        if run.status == "queued":
+            run.status = transition(run.status, "start")
+            run.started_at = now
+        if run.status == "running":
+            run.status = transition(run.status, "partial")
+        total = _case_count(session, run.dataset_version_id)
+        execution_errors = int(
+            session.scalar(
+                select(func.count())
+                .select_from(CaseResult)
+                .where(CaseResult.run_id == run.id, CaseResult.execution_status == "execution_error")
+            )
+            or 0
+        )
+        summary = _summary(session, run.id, total, execution_errors)
+        summary["budget_reason"] = "workspace token budget reached"
+        run.summary = summary
+        run.progress = summary
+        run.finished_at = now
+        run.heartbeat_at = now
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -53,6 +118,12 @@ def _claim_batch(run_id: str) -> list[uuid.UUID] | None:
         run = session.get(EvaluationRun, uuid.UUID(run_id))
         if run is None or run.status in {"completed", "partial"}:
             return None
+        if run.status == "cancelled":
+            return []
+        if _another_run_is_active(session, run):
+            return None
+        if _budget_reached(session, run):
+            return []
         now = _now()
         if run.status == "queued":
             run.status = transition(run.status, "start")
@@ -123,13 +194,19 @@ def _execute_claimed(run_id: str, test_case_id: uuid.UUID) -> None:
         evaluation_case = _to_case(case)
         adapter_type = target.adapter_type if target is not None else "unknown"
         try:
-            if adapter_type != "mock":
-                outcome = asyncio.run(_execute_case(evaluation_case, _UnsupportedAdapter(), _evaluators(run)))
-            else:
-                outcome = asyncio.run(
-                    _execute_case(evaluation_case, _mock_for(evaluation_case), _evaluators(run))
-                )
+            outcome = asyncio.run(
+                _execute_case(evaluation_case, _adapter_for(adapter_type, target, evaluation_case), _evaluators(run))
+            )
             persist_case(session, run.id, case.id, outcome)
+            from backend.app.logging import write_log
+
+            write_log(
+                "case_completed",
+                trace_id=str(run.id),
+                case_key=case.case_key,
+                execution_status=outcome.execution_status,
+                error_category=outcome.error_category,
+            )
         except IntegrityError:
             session.rollback()
             return
@@ -270,19 +347,87 @@ def _to_case(row: TestCase) -> EvaluationCase:
         context=row.context,
         tags=tuple(row.tags or []),
         json_schema=row.json_schema,
+        relevant_document_ids=tuple(row.relevant_document_ids or []),
+        retrieved_context=None if row.retrieved_context is None else tuple(row.retrieved_context),
+        citations=tuple(row.citations or []),
+        expected_policy=row.expected_policy,
+        human_labels=row.human_labels,
+        allowed_tools=tuple(row.allowed_tools or []),
+        goal=row.goal,
+        constraints=tuple(row.constraints or []),
+        expected_tools=tuple(row.expected_tools or []),
     )
 
 
+def _adapter_for(adapter_type: str, target: TargetConfig | None, case: EvaluationCase):
+    if adapter_type == "mock":
+        behavior = ""
+        if target is not None and isinstance(target.config, dict):
+            behavior = str(target.config.get("behavior") or "")
+        if behavior == "refuse_all":
+            return MockTargetAdapter({case.case_key: success_result(REFUSAL_SENTENCE)})
+        if behavior == "release_baseline":
+            return MockTargetAdapter(
+                {
+                    case.case_key: success_result(
+                        case.expected_output,
+                        latency_ms=20.0,
+                        documents=[{"id": "doc-1", "text": "The account summary shows the balance."}],
+                        input_tokens=10,
+                        output_tokens=8,
+                        behavior="release_baseline",
+                    )
+                }
+            )
+        if behavior == "release_candidate":
+            return MockTargetAdapter(
+                {
+                    case.case_key: success_result(
+                        case.expected_output,
+                        latency_ms=40.0,
+                        documents=[{"id": "doc-9", "text": "This document does not support a refund."}],
+                        input_tokens=30,
+                        output_tokens=20,
+                        behavior="release_candidate",
+                    )
+                }
+            )
+        return _mock_for(case)
+    if adapter_type == "http_rag":
+        endpoint = ""
+        if target is not None and isinstance(target.config, dict):
+            endpoint = str(target.config.get("endpoint") or "")
+        if endpoint:
+            return HttpRagAdapter(endpoint)
+    if adapter_type == "langgraph":
+        return LangGraphAdapter()
+    return _UnsupportedAdapter()
+
+
 def _mock_for(case: EvaluationCase) -> MockTargetAdapter:
+    scripted = MockTargetAdapter.for_sample([case])
     if case.case_key == "case-timeout":
-        script = timeout_result()
+        scripted.scripts[case.case_key] = timeout_result()
     elif case.case_key == "case-rate-limit":
-        script = rate_limit_result()
+        scripted.scripts[case.case_key] = rate_limit_result()
     elif case.case_key == "case-wrong":
-        script = success_result("wrong answer")
-    else:
-        script = success_result(case.expected_output)
-    return MockTargetAdapter({case.case_key: script})
+        scripted.scripts[case.case_key] = success_result("wrong answer")
+    elif case.case_key == "case-missing-docs":
+        scripted.scripts[case.case_key] = success_result(
+            case.expected_output,
+            documents=[{"id": "doc-9", "text": "This document is not relevant."}],
+        )
+    elif case.case_key == "case-unsupported":
+        scripted.scripts[case.case_key] = success_result(
+            case.expected_output,
+            documents=[{"id": "doc-1", "text": "The retrieved page does not support the claim."}],
+        )
+    elif case.case_key == "case-bad-judge":
+        scripted.scripts[case.case_key] = success_result(
+            case.expected_output,
+            documents=[{"id": "doc-1", "text": "Account status is recorded."}],
+        )
+    return scripted
 
 
 class _UnsupportedAdapter:

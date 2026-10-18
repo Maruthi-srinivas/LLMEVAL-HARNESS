@@ -17,6 +17,16 @@ class Evaluator:
     name = "evaluator"
     version = "1"
     required_fields: frozenset[str] = frozenset()
+    config_schema: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    }
+    score_range: tuple[float, float] | None = (0.0, 1.0)
+    failure_behavior = (
+        "A quality failure means the scored answer missed the metric. "
+        "metric_error means the metric could not be computed and is not a wrong answer."
+    )
 
     def evaluate(self, case: EvaluationCase, prediction: TargetResult) -> EvaluationScore:
         raise NotImplementedError
@@ -104,6 +114,11 @@ class JsonSchemaEvaluator(Evaluator):
 class LatencyEvaluator(Evaluator):
     name = "latency"
     required_fields = frozenset()
+    score_range = None
+    failure_behavior = (
+        "Latency records milliseconds and passes when the target reports latency_ms. "
+        "A missing latency is metric_error, not a slow answer."
+    )
 
     def evaluate(self, case: EvaluationCase, prediction: TargetResult) -> EvaluationScore:
         latency = prediction.metadata.get("latency_ms")
@@ -121,6 +136,11 @@ class LatencyEvaluator(Evaluator):
 class TokenUsageEvaluator(Evaluator):
     name = "token_usage"
     required_fields = frozenset()
+    score_range = None
+    failure_behavior = (
+        "Token usage records the reported token total and passes when both counts are present. "
+        "A missing count is metric_error, not a quality failure."
+    )
 
     def evaluate(self, case: EvaluationCase, prediction: TargetResult) -> EvaluationScore:
         usage = prediction.metadata.get("token_usage")

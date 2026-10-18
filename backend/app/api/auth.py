@@ -16,6 +16,7 @@ def _response(principal, token: str) -> AuthResponse:
         user_id=principal.user.id,
         workspace_id=principal.workspace.id,
         project_id=principal.project.id,
+        role=principal.role,
     )
 
 

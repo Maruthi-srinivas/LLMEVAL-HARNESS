@@ -65,10 +65,40 @@ def import_cases(
                 context=case.context,
                 tags=list(case.tags),
                 json_schema=case.json_schema,
+                relevant_document_ids=list(case.relevant_document_ids),
+                retrieved_context=None if case.retrieved_context is None else list(case.retrieved_context),
+                citations=list(case.citations),
+                expected_policy=case.expected_policy,
+                human_labels=case.human_labels,
+                allowed_tools=list(case.allowed_tools),
+                goal=case.goal,
+                constraints=list(case.constraints),
+                expected_tools=list(case.expected_tools),
             )
         )
     session.flush()
     return dataset, version, len(cases)
+
+
+def list_datasets(session: Session, workspace_id: uuid.UUID) -> list[dict]:
+    rows = session.execute(
+        select(Dataset, func.count(DatasetVersion.id))
+        .join(Project, Dataset.project_id == Project.id)
+        .outerjoin(DatasetVersion, DatasetVersion.dataset_id == Dataset.id)
+        .where(Project.workspace_id == workspace_id)
+        .group_by(Dataset.id)
+        .order_by(Dataset.name)
+    ).all()
+    return [
+        {
+            "id": str(dataset.id),
+            "name": dataset.name,
+            "project_id": str(dataset.project_id),
+            "version_count": int(version_count),
+            "created_at": dataset.created_at.isoformat(),
+        }
+        for dataset, version_count in rows
+    ]
 
 
 def version_summaries(session: Session, dataset_id: uuid.UUID) -> list[dict]:

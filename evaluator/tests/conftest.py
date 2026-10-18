@@ -3,3 +3,4 @@
 import os
 
 os.environ["EVALFORGE_ENQUEUE_RUNS"] = "false"
+os.environ["KAFKA_BOOTSTRAP_SERVERS"] = ""

@@ -1,0 +1,65 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: evalforge
+    folder: EvalForge
+    interval: 1m
+    rules:
+      - uid: queue-age
+        title: Queue age
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: evalforge_queue_wait_seconds
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: Queued work is older than two minutes
+        labels:
+          severity: warning
+      - uid: heartbeat-loss
+        title: Heartbeat loss
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: evalforge_heartbeat_age_seconds
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: A running worker heartbeat is stale
+        labels:
+          severity: warning
+      - uid: http-5xx
+        title: HTTP 5xx
+        condition: A
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: sum(rate(evalforge_http_requests_total{status=~"5.."}[5m]))
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: The API is returning server errors
+        labels:
+          severity: warning

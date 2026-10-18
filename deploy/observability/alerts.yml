@@ -1,0 +1,24 @@
+groups:
+  - name: evalforge
+    rules:
+      - alert: QueueAge
+        expr: evalforge_queue_wait_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Queued work is older than two minutes
+      - alert: HeartbeatLoss
+        expr: evalforge_heartbeat_age_seconds > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: A running worker heartbeat is stale
+      - alert: HTTP5xx
+        expr: sum(rate(evalforge_http_requests_total{status=~"5.."}[5m])) > 0.5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: The API is returning server errors

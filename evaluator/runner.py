@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 from evaluator.aggregate import summarize
 from evaluator.metrics.deterministic import Evaluator
 from evaluator.types import CaseExecution, EvaluationCase, TargetResult
@@ -11,7 +13,9 @@ class IncompatibleConfiguration(Exception):
     pass
 
 
-KNOWN_FIELDS = frozenset({"expected_output", "json_schema", "input", "context"})
+KNOWN_FIELDS = frozenset(
+    {"expected_output", "json_schema", "input", "context", "relevant_document_ids", "citations", "retrieved_context", "expected_policy", "allowed_tools", "expected_tools", "goal"}
+)
 
 
 def validate_configuration(cases: list[EvaluationCase], evaluators: list[Evaluator]) -> None:
@@ -45,7 +49,10 @@ def _usage(prediction: TargetResult) -> dict:
 
 
 async def _execute_case(case: EvaluationCase, adapter, evaluators: list[Evaluator]) -> CaseExecution:
-    prediction = await adapter.invoke(case.input_text, {"case_key": case.case_key})
+    prediction = await adapter.invoke(
+        case.input_text,
+        {"case_key": case.case_key, "expected_output": case.expected_output},
+    )
     if prediction.error_category:
         return CaseExecution(
             case_key=case.case_key,
@@ -60,6 +67,8 @@ async def _execute_case(case: EvaluationCase, adapter, evaluators: list[Evaluato
     scores = []
     for evaluator in evaluators:
         score = evaluator.evaluate(case, prediction)
+        if inspect.isawaitable(score):
+            score = await score
         if score.status == "skipped":
             continue
         scores.append(score)
@@ -72,6 +81,9 @@ async def _execute_case(case: EvaluationCase, adapter, evaluators: list[Evaluato
         latency_ms=_latency(prediction),
         token_usage=_usage(prediction),
         scores=scores,
+        retrieved_documents=list(prediction.documents),
+        citations=list(case.citations),
+        trace=prediction.metadata.get("trace") if isinstance(prediction.metadata.get("trace"), dict) else None,
     )
 
 

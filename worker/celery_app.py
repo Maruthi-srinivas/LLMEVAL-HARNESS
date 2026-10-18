@@ -23,3 +23,14 @@ celery_app.conf.update(
 )
 
 import worker.tasks  # noqa: E402,F401
+
+def _serve_metrics() -> None:
+    from prometheus_client import start_http_server
+
+    try:
+        start_http_server(9100, addr="0.0.0.0")
+    except OSError:
+        return
+
+
+_serve_metrics()

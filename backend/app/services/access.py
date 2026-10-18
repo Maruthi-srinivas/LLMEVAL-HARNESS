@@ -17,6 +17,7 @@ class Principal:
     user: User
     workspace: Workspace
     project: Project
+    role: str
 
 
 def principal_for_user(session: Session, user: User) -> Principal:
@@ -29,7 +30,7 @@ def principal_for_user(session: Session, user: User) -> Principal:
     )
     if workspace is None or project is None:
         raise APIError(401, "unauthorized", "Authentication required")
-    return Principal(user=user, workspace=workspace, project=project)
+    return Principal(user=user, workspace=workspace, project=project, role=membership.role)
 
 
 def require_project(session: Session, workspace_id: uuid.UUID, project_id: uuid.UUID, code: str) -> Project:

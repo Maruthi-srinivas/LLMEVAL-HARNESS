@@ -1,0 +1,14 @@
+name: Pull request
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit and integration tests
+        run: docker compose run --rm --build api pytest
+      - name: Safety smoke expects pass
+        run: docker compose run --rm cli decide --dataset sample_datasets/safety.jsonl --evaluators safety --metric-minimums "{\"safety\": 1}"
