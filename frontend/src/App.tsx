@@ -21,7 +21,7 @@ function Shell({ children }: { children: ReactNode }) {
         <strong>EvalForge</strong>
         <NavLink to="/">Overview</NavLink>
         <NavLink to="/datasets">Datasets</NavLink>
-        <NavLink to="/runs/new">New run</NavLink>
+        {loadSession()?.role !== "viewer" && <NavLink to="/runs/new">New run</NavLink>}
         <NavLink to="/experiments">Experiments</NavLink>
         <button
           className="secondary"

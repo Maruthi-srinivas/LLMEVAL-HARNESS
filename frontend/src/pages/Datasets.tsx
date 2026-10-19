@@ -11,6 +11,7 @@ export function DatasetsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<{ line: number | null; message: string }[]>([]);
+  const viewer = loadSession()?.role === "viewer";
 
   function refresh() {
     request<{ datasets: Dataset[] }>("/api/v1/datasets")
@@ -48,7 +49,7 @@ export function DatasetsPage() {
   return (
     <>
       <h1>Datasets</h1>
-      <form className="card" onSubmit={upload}>
+      {viewer ? <p>Viewers can read datasets.</p> : <form className="card" onSubmit={upload}>
         <label>
           Name
           <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -66,7 +67,8 @@ export function DatasetsPage() {
           </ul>
         )}
         <button type="submit">Upload</button>
-      </form>
+      </form>}
+      {viewer && error && <p className="error">{error}</p>}
       {datasets === null ? (
         <p>Loading datasets…</p>
       ) : datasets.length === 0 ? (

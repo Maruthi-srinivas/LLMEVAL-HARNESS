@@ -4,6 +4,7 @@ export type Session = {
   workspace_id: string;
   project_id: string;
   role: string;
+  organization_id?: string;
 };
 
 const KEY = "evalforge.session";
@@ -45,7 +46,10 @@ export class ApiError extends Error {
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = loadSession();
   const headers = new Headers(init.headers);
-  if (session) headers.set("Authorization", `Bearer ${session.token}`);
+  if (session) {
+    headers.set("Authorization", `Bearer ${session.token}`);
+    if (session.workspace_id) headers.set("X-EvalForge-Workspace", session.workspace_id);
+  }
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -63,7 +67,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 export async function download(path: string, filename: string): Promise<void> {
   const session = loadSession();
   const headers = new Headers();
-  if (session) headers.set("Authorization", `Bearer ${session.token}`);
+  if (session) {
+    headers.set("Authorization", `Bearer ${session.token}`);
+    if (session.workspace_id) headers.set("X-EvalForge-Workspace", session.workspace_id);
+  }
   const response = await fetch(path, { headers });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);

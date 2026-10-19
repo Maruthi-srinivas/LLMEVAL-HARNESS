@@ -215,6 +215,19 @@ def _execute_claimed(run_id: str, test_case_id: uuid.UUID) -> None:
         _write_progress(session, run, _case_count(session, run.dataset_version_id))
 
 
+def _store_report(session, run: EvaluationRun) -> None:
+    from backend.app.services.artifacts import put_report
+    from backend.app.services.reports import json_report
+
+    workspace_id = session.scalar(select(Project.workspace_id).where(Project.id == run.project_id))
+    if workspace_id is None:
+        return
+    try:
+        put_report(workspace_id, run.id, json_report(session, run))
+    except Exception:
+        return
+
+
 def _finalize(run_id: str) -> bool:
     with session_scope() as session:
         run = session.get(EvaluationRun, uuid.UUID(run_id))
@@ -241,6 +254,7 @@ def _finalize(run_id: str) -> bool:
         run.progress = summary
         run.finished_at = _now()
         run.heartbeat_at = run.finished_at
+        _store_report(session, run)
         return True
 
 

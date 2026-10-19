@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ApiError, request } from "../api";
+import { ApiError, loadSession, request } from "../api";
 
 type Overview = {
   generated_at: string;
-  scope: { workspace_id: string; workspace_name: string };
+  scope: { workspace_id: string; workspace_name: string; organization_name?: string };
   status_counts: Record<string, number>;
   metric_averages: { metric_name: string; average: number }[] | null;
   latency_ms_median: number | null;
@@ -39,6 +39,10 @@ export function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [runs, setRuns] = useState<RunList["runs"]>([]);
   const [error, setError] = useState("");
+  const [inviteToken, setInviteToken] = useState("");
+  const [acceptToken, setAcceptToken] = useState("");
+  const [notice, setNotice] = useState("");
+  const role = loadSession()?.role;
 
   useEffect(() => {
     Promise.all([request<Overview>("/api/v1/overview"), request<RunList>("/api/v1/evaluations")])
@@ -56,8 +60,49 @@ export function OverviewPage() {
     <>
       <h1>Overview</h1>
       <p className="muted">
-        Scope: {overview.scope.workspace_name}. Freshness: {overview.generated_at}.
+        Organization: {overview.scope.organization_name || "missing"}. Workspace: {overview.scope.workspace_name}. Freshness: {overview.generated_at}.
       </p>
+      {role === "owner" && (
+        <section className="card">
+          <h2>Invite</h2>
+          <button
+            type="button"
+            onClick={() => {
+              request<{ token: string }>("/api/v1/invites", { method: "POST", body: JSON.stringify({ role: "member" }) })
+                .then((body) => setInviteToken(body.token))
+                .catch((err) => setNotice(err instanceof ApiError ? err.message : "Could not create an invite"));
+            }}
+          >
+            Create member invite
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              request<{ token: string }>("/api/v1/invites", { method: "POST", body: JSON.stringify({ role: "viewer" }) })
+                .then((body) => setInviteToken(body.token))
+                .catch((err) => setNotice(err instanceof ApiError ? err.message : "Could not create an invite"));
+            }}
+          >
+            Create viewer invite
+          </button>
+          {inviteToken && <p>Invite token: {inviteToken}</p>}
+        </section>
+      )}
+      <section className="card">
+        <h2>Accept invite</h2>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            request(`/api/v1/invites/${encodeURIComponent(acceptToken)}/accept`, { method: "POST" })
+              .then(() => setNotice("Invite accepted."))
+              .catch((err) => setNotice(err instanceof ApiError ? err.message : "Could not accept the invite"));
+          }}
+        >
+          <input value={acceptToken} onChange={(event) => setAcceptToken(event.target.value)} placeholder="Invite token" />
+          <button type="submit">Accept</button>
+        </form>
+        {notice && <p>{notice}</p>}
+      </section>
       <section className="grid">
         {Object.entries(overview.status_counts).map(([status, count]) => (
           <article className="card" key={status}>
@@ -165,7 +210,7 @@ export function OverviewPage() {
       <section className="card">
         <h2>Runs</h2>
         {runs.length === 0 ? (
-          <p>No runs yet. <Link to="/runs/new">Start one</Link>.</p>
+          <p>No runs yet. {role === "viewer" ? "Viewers cannot start a run." : <Link to="/runs/new">Start one</Link>}</p>
         ) : (
           <table>
             <thead>

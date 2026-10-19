@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db, get_principal
 from backend.app.schemas import ReviewCreate
-from backend.app.services.access import Principal
+from backend.app.services.access import Principal, require_writer
 from backend.app.services.reviews import approve_review, queue_review
 
 router = APIRouter(tags=["reviews"])
@@ -19,6 +19,7 @@ def post_review(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     return queue_review(session, principal, body.run_id, body.case_key, body.labels)
 
 

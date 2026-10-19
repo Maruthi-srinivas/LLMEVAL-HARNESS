@@ -9,7 +9,7 @@ from backend.app.api.deps import get_db, get_principal
 from backend.app.errors import APIError
 from backend.app.models import TargetConfig
 from backend.app.schemas import TargetCreate
-from backend.app.services.access import Principal, require_project, require_target
+from backend.app.services.access import Principal, require_project, require_target, require_writer
 
 router = APIRouter(tags=["targets"])
 
@@ -20,6 +20,7 @@ def create_target(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     project = require_project(session, principal.workspace.id, body.project_id, "validation_error")
     config = dict(body.config)
     config["prompt_version"] = body.prompt_version

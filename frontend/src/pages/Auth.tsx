@@ -24,6 +24,7 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
         workspace_id: string;
         project_id: string;
         role: string;
+        organization_id: string;
       }>(`/api/v1/auth/${mode === "register" ? "register" : "login"}`, {
         method: "POST",
         body: JSON.stringify(body),

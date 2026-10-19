@@ -1,0 +1,25 @@
+# Staging uses the same images as the local stack. Point EVALFORGE_IMAGE at a previous tag to roll back.
+# Add workers with: docker compose up -d --scale worker=2
+name: evalharness-staging
+
+services:
+  api:
+    image: ${EVALFORGE_IMAGE:-evalharness-app:staging-previous}
+    mem_limit: 512m
+    environment:
+      DATABASE_URL: postgresql+psycopg://evalforge:evalforge@postgres:5432/evalforge
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-dev-only-change-me}
+      KAFKA_BOOTSTRAP_SERVERS: ""
+      EVALFORGE_ENQUEUE_RUNS: "false"
+      EVALFORGE_CORS_ORIGIN: http://localhost:3000
+    command: ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8010:8000"
+    networks:
+      - evalharness
+
+networks:
+  evalharness:
+    external: true
+    name: evalharness_default

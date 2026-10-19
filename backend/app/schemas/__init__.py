@@ -18,13 +18,22 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
+class MembershipInfo(BaseModel):
+    workspace_id: UUID
+    organization_id: UUID
+    workspace_name: str
+    role: str
+
+
 class AuthResponse(BaseModel):
     token: str
     token_type: str = "bearer"
     user_id: UUID
     workspace_id: UUID
+    organization_id: UUID
     project_id: UUID
     role: str
+    memberships: list[MembershipInfo]
 
 
 class TargetCreate(BaseModel):
@@ -33,6 +42,18 @@ class TargetCreate(BaseModel):
     adapter_type: str = Field(min_length=1, max_length=64)
     config: dict = Field(default_factory=dict)
     prompt_version: str = Field(min_length=1, max_length=64)
+
+
+class InviteCreate(BaseModel):
+    role: str = Field(pattern="^(member|viewer)$")
+
+
+class ServiceAccountCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class RetentionUpdate(BaseModel):
+    retention_days: int = Field(ge=0, le=3650)
 
 
 class ReviewCreate(BaseModel):

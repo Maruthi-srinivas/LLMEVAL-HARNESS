@@ -8,6 +8,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from backend.app.api.auth import router as auth_router
 from backend.app.api.datasets import router as dataset_router
+from backend.app.api.enterprise import router as enterprise_router
 from backend.app.api.evaluations import router as evaluation_router
 from backend.app.api.evaluators import router as evaluator_router
 from backend.app.api.experiments import router as experiment_router
@@ -34,6 +35,7 @@ app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(evaluator_router, prefix="/api/v1")
 app.include_router(overview_router, prefix="/api/v1")
 app.include_router(experiment_router, prefix="/api/v1")
+app.include_router(enterprise_router, prefix="/api/v1")
 app.include_router(review_router, prefix="/api/v1")
 
 

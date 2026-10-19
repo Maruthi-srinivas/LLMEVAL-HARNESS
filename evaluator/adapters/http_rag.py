@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from evaluator.net import UnsafeTargetUrl, ensure_safe_url, redirected
 from evaluator.types import TargetResult
 
 
@@ -19,8 +20,10 @@ class HttpRagAdapter:
     async def invoke(self, input_text: str, metadata: dict[str, Any]) -> TargetResult:
         started = time.perf_counter()
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout) as client:
-                response = await client.post(self.endpoint, json={"question": input_text})
+            async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout, follow_redirects=False) as client:
+                response = await self._post(client, self.endpoint, input_text)
+        except UnsafeTargetUrl as exc:
+            return _failure("provider_error", str(exc))
         except httpx.TimeoutException:
             return _failure("timeout", "RAG endpoint timed out")
         except httpx.HTTPError as exc:
@@ -42,6 +45,20 @@ class HttpRagAdapter:
             metadata={"latency_ms": elapsed, "token_usage": usage},
             documents=documents,
         )
+
+    async def _post(self, client: httpx.AsyncClient, url: str, input_text: str) -> httpx.Response:
+        current = url
+        for _ in range(5):
+            if self.transport is None:
+                ensure_safe_url(current)
+            response = await client.post(current, json={"question": input_text})
+            if response.status_code not in {301, 302, 303, 307, 308}:
+                return response
+            location = response.headers.get("location")
+            if not location:
+                return response
+            current = redirected(current, location) if self.transport is None else location
+        raise UnsafeTargetUrl("Target URL redirected too many times")
 
 
 def _parse(body: Any) -> TargetResult | tuple[str, list[dict[str, str]], dict]:

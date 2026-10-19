@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_db, get_principal
 from backend.app.errors import APIError, dataset_error_details
 from backend.app.schemas import CalibrationRequest
-from backend.app.services.access import Principal, require_dataset, require_project, require_run
+from backend.app.services.access import Principal, require_dataset, require_owner, require_project, require_run, require_writer
+from backend.app.services.audit import record
 from backend.app.services.calibration import calibration_report
-from backend.app.services.datasets import cases_for_version, import_cases, list_datasets, version_summaries
+from backend.app.services.datasets import cases_for_version, delete_dataset, import_cases, list_datasets, version_summaries
+from backend.app.services.exports import approve_export, download_export, request_export
 from evaluator.datasets.loader import MAX_DATASET_BYTES, DatasetValidationError, load_jsonl_text
 
 router = APIRouter(tags=["datasets"])
@@ -31,6 +33,7 @@ def read_calibration(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     require_dataset(session, principal.workspace.id, dataset_id)
     run = require_run(session, principal.workspace.id, body.run_id)
     return calibration_report(session, dataset_id, run, body.evaluator_names)
@@ -44,6 +47,7 @@ async def upload_dataset(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     if not dataset_name.strip() or len(dataset_name) > 200:
         raise APIError(422, "validation_error", "dataset_name must be 1 to 200 characters")
     project = require_project(session, principal.workspace.id, project_id, "invalid_dataset")
@@ -64,6 +68,7 @@ async def upload_dataset(
             dataset_error_details(exc.errors),
         ) from exc
     dataset, version, case_count = import_cases(session, project, dataset_name.strip(), cases)
+    record(session, principal, "dataset_import", "dataset", str(dataset.id))
     return {
         "dataset_id": str(dataset.id),
         "version_id": str(version.id),
@@ -135,3 +140,45 @@ def read_dataset_version(
             for case in cases_for_version(session, version.id)
         ],
     }
+
+
+@router.delete("/datasets/{dataset_id}", status_code=204)
+def remove_dataset(
+    dataset_id: UUID,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_db),
+) -> None:
+    require_owner(principal)
+    dataset = require_dataset(session, principal.workspace.id, dataset_id)
+    delete_dataset(session, dataset)
+    record(session, principal, "deletion", "dataset", str(dataset_id))
+
+
+@router.post("/datasets/{dataset_id}/exports", status_code=201)
+def post_export(
+    dataset_id: UUID,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_db),
+) -> dict:
+    return request_export(session, principal, dataset_id)
+
+
+@router.post("/exports/{export_id}/approve")
+def post_export_approval(
+    export_id: UUID,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_db),
+) -> dict:
+    return approve_export(session, principal, export_id)
+
+
+@router.get("/exports/{export_id}")
+def read_export(
+    export_id: UUID,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_db),
+):
+    from fastapi.responses import Response
+
+    body = download_export(session, principal, export_id)
+    return Response(content=body, media_type="application/x-ndjson")

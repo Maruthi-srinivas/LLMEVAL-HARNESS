@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db, get_principal
 from backend.app.schemas import ExperimentCreate, PolicyCreate
-from backend.app.services.access import Principal
+from backend.app.services.access import Principal, require_owner, require_writer
+from backend.app.services.audit import record
 from backend.app.services.experiments import (
     create_experiment,
     create_policy,
@@ -27,7 +28,10 @@ def post_policy(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
-    return policy_payload(create_policy(session, principal.workspace.id, body))
+    require_owner(principal)
+    policy = create_policy(session, principal.workspace.id, body)
+    record(session, principal, "policy_change", "release_policy", str(policy.id))
+    return policy_payload(policy)
 
 
 @router.get("/policies")
@@ -44,6 +48,7 @@ def post_experiment(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     return experiment_payload(create_experiment(session, principal.workspace.id, body))
 
 

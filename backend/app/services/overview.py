@@ -15,7 +15,12 @@ _STATUSES = ("pending", "queued", "running", "completed", "partial", "cancelled"
 _EXCLUDED_AVERAGES = ("safety", "tool_selection", "tool_arguments", "tool_permission", "tool_recovery", "tool_unnecessary")
 
 
-def workspace_overview(session: Session, workspace_id: uuid.UUID, workspace_name: str) -> dict:
+def workspace_overview(
+    session: Session,
+    workspace_id: uuid.UUID,
+    workspace_name: str,
+    organization_name: str = "",
+) -> dict:
     status_rows = session.execute(
         select(EvaluationRun.status, func.count())
         .join(Project, EvaluationRun.project_id == Project.id)
@@ -69,7 +74,11 @@ def workspace_overview(session: Session, workspace_id: uuid.UUID, workspace_name
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "scope": {"workspace_id": str(workspace_id), "workspace_name": workspace_name},
+        "scope": {
+            "workspace_id": str(workspace_id),
+            "workspace_name": workspace_name,
+            "organization_name": organization_name,
+        },
         "status_counts": counts,
         "metric_averages": metric_averages,
         "latency_ms_median": None if median is None else float(median),

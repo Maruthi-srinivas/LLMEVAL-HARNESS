@@ -18,19 +18,50 @@ class Principal:
     workspace: Workspace
     project: Project
     role: str
+    service_account_id: uuid.UUID | None = None
 
 
-def principal_for_user(session: Session, user: User) -> Principal:
-    membership = session.scalar(select(Membership).where(Membership.user_id == user.id))
-    if membership is None:
-        raise APIError(401, "unauthorized", "Authentication required")
-    workspace = session.get(Workspace, membership.workspace_id)
-    project = session.scalar(
-        select(Project).where(Project.workspace_id == membership.workspace_id, Project.name == "default")
-    )
+def require_writer(principal: Principal) -> None:
+    if principal.role not in {"owner", "member", "service"}:
+        raise APIError(403, "forbidden", "This action requires a member")
+
+
+def require_owner(principal: Principal) -> None:
+    if principal.role != "owner":
+        raise APIError(403, "forbidden", "This action requires the workspace owner")
+
+
+def principal_for_user(session: Session, user: User, workspace_id: uuid.UUID | None = None) -> Principal:
+    query = select(Membership).where(Membership.user_id == user.id)
+    if workspace_id is None:
+        membership = session.scalar(query.order_by(Membership.created_at.asc()))
+        if membership is None:
+            raise APIError(401, "unauthorized", "Authentication required")
+    else:
+        membership = session.scalar(query.where(Membership.workspace_id == workspace_id))
+        if membership is None:
+            raise APIError(404, "validation_error", "Resource not found")
+    return _principal(session, user, membership.workspace_id, membership.role, None)
+
+
+def _principal(
+    session: Session,
+    user: User,
+    workspace_id: uuid.UUID,
+    role: str,
+    service_account_id: uuid.UUID | None,
+) -> Principal:
+    workspace = session.get(Workspace, workspace_id)
+    project = session.scalar(select(Project).where(Project.workspace_id == workspace_id, Project.name == "default"))
     if workspace is None or project is None:
         raise APIError(401, "unauthorized", "Authentication required")
-    return Principal(user=user, workspace=workspace, project=project, role=membership.role)
+    return Principal(
+        user=user,
+        workspace=workspace,
+        project=project,
+        role=role,
+        service_account_id=service_account_id,
+    )
 
 
 def require_project(session: Session, workspace_id: uuid.UUID, project_id: uuid.UUID, code: str) -> Project:

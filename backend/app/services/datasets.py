@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from backend.app.models import Dataset, DatasetVersion, Project, TestCase
+from backend.app.errors import APIError
+from backend.app.models import Dataset, DatasetVersion, EvaluationRun, ExportRequest, Project, TestCase
 from backend.app.settings import MAX_DATASET_CASES
 from evaluator.datasets.loader import content_hash
 from evaluator.types import EvaluationCase
@@ -121,6 +122,23 @@ def version_summaries(session: Session, dataset_id: uuid.UUID) -> list[dict]:
             }
         )
     return summaries
+
+
+def delete_dataset(session: Session, dataset: Dataset) -> None:
+    version_ids = list(
+        session.scalars(select(DatasetVersion.id).where(DatasetVersion.dataset_id == dataset.id)).all()
+    )
+    if version_ids:
+        used = session.scalar(
+            select(EvaluationRun.id).where(EvaluationRun.dataset_version_id.in_(version_ids))
+        )
+        if used is not None:
+            raise APIError(409, "validation_error", "Delete the runs that use this dataset first")
+        session.execute(delete(ExportRequest).where(ExportRequest.dataset_version_id.in_(version_ids)))
+        session.execute(delete(TestCase).where(TestCase.dataset_version_id.in_(version_ids)))
+        session.execute(delete(DatasetVersion).where(DatasetVersion.dataset_id == dataset.id))
+    session.delete(dataset)
+    session.flush()
 
 
 def cases_for_version(session: Session, version_id: uuid.UUID) -> list[TestCase]:

@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_db, get_principal
 from backend.app.errors import APIError
 from backend.app.schemas import EvaluationCreate
-from backend.app.services.access import Principal, require_dataset_version, require_run, require_target
+from backend.app.services.access import Principal, require_dataset_version, require_run, require_target, require_writer
+from backend.app.services.artifacts import object_key, report_exists
+from backend.app.services.audit import record
 from backend.app.services.evaluations import case_results, create_queued_run, list_runs
 from backend.app.services.reports import csv_report, json_report
 from evaluator.status import transition
@@ -24,9 +26,11 @@ def create_evaluation(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     _dataset, version = require_dataset_version(session, principal.workspace.id, body.dataset_version_id)
     target = require_target(session, principal.workspace.id, body.target_id)
     run = create_queued_run(session, version, target, body.evaluator_names)
+    record(session, principal, "run_creation", "evaluation_run", str(run.id))
     return {"run_id": str(run.id), "status": run.status, "message": "Evaluation accepted"}
 
 
@@ -44,6 +48,7 @@ def cancel_evaluation(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_db),
 ) -> dict:
+    require_writer(principal)
     run = require_run(session, principal.workspace.id, run_id)
     if run.status in _FINISHED:
         raise APIError(409, "validation_error", "Run is already finished")
@@ -90,7 +95,10 @@ def read_evaluation_report(
 ):
     run = require_run(session, principal.workspace.id, run_id)
     if format == "json":
-        return json_report(session, run)
+        body = json_report(session, run)
+        key = object_key(principal.workspace.id, run.id)
+        body["artifact_key"] = key if report_exists(principal.workspace.id, run.id) else None
+        return body
     if format == "csv":
         return Response(
             content=csv_report(session, run),
